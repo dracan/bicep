@@ -102,7 +102,14 @@ namespace Bicep.Core.Emit
                     scopeSymbol = semanticModel.ResourceAncestors.GetAncestors(resource).LastOrDefault()?.Resource;
                 }
 
-                if (resource.Type is not ResourceType resourceType || resource.SafeGetBodyPropertyValue(LanguageConstants.ResourceNamePropertyName) is not StringSyntax namePropertyValue)
+                var resourceType = resource.Type switch
+                {
+                    ResourceType singleType => singleType,
+                    ArrayType { Item: ResourceType itemType } => itemType,
+                    _ => null
+                };
+
+                if (resourceType is null || resource.SafeGetBodyPropertyValue(LanguageConstants.ResourceNamePropertyName) is not StringSyntax namePropertyValue)
                 {
                     //currently limiting check to 'name' property values that are strings, although it can be references or other syntaxes
                     continue;
