@@ -3,7 +3,9 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Bicep.Core.DataFlow;
 using Bicep.Core.Diagnostics;
+using Bicep.Core.Extensions;
 using Bicep.Core.Semantics;
 using Bicep.Core.Syntax;
 using Bicep.Core.TypeSystem;
@@ -13,6 +15,20 @@ namespace Bicep.Core.Emit
 {
     public static class EmitLimitationCalculator
     {
+        // the top-level properties whose values are expected to depend on the item or index variable in a resource loop
+        private static readonly ImmutableArray<string> ExpectedVariantResourceProperties = new[]
+        {
+            LanguageConstants.ResourceNamePropertyName,
+            LanguageConstants.ResourceParentPropertyName,
+            LanguageConstants.ResourceScopePropertyName
+        }.ToImmutableArray();
+
+        private static readonly ImmutableArray<string> ExpectedVariantModuleProperties = new[]
+        {
+            LanguageConstants.ResourceNamePropertyName,
+            LanguageConstants.ResourceScopePropertyName
+        }.ToImmutableArray();
+
         public static EmitLimitationInfo Calculate(SemanticModel model)
         {
             var diagnosticWriter = ToListDiagnosticWriter.Create();
@@ -24,6 +40,7 @@ namespace Bicep.Core.Emit
             ForSyntaxValidatorVisitor.Validate(model, diagnosticWriter);
             DetectDuplicateNames(model, diagnosticWriter, resourceScopeData, moduleScopeData);
             DetectIncorrectlyFormattedNames(model, diagnosticWriter);
+            DetectResourceInvariantProperties(model, diagnosticWriter);
 
             return new EmitLimitationInfo(diagnosticWriter.GetDiagnostics(), moduleScopeData, resourceScopeData);
         }
@@ -169,6 +186,69 @@ namespace Bicep.Core.Emit
                     }
                 }
             }
+        }
+
+        public static void DetectResourceInvariantProperties(SemanticModel semanticModel, IDiagnosticWriter diagnosticWriter)
+        {
+            foreach (var resource in semanticModel.Root.GetAllResourceDeclarations())
+            {
+                if(resource.DeclaringResource.IsExistingResource())
+                {
+                    // existing resource syntax doesn't result in deployment but instead is
+                    // used as a convenient way of constructing a symbolic name
+                    // as such, invariant names aren't really a concern here
+                    // (and may even be desirable)
+                    continue;
+                }
+
+                if(resource.DeclaringResource.Value is not ForSyntax @for || @for.ItemVariable is not { } itemVariable)
+                {
+                    // invariant identifiers are only a concern for resource loops
+                    // this is not a resource loop OR the item variable is malformed
+                    continue;
+                }
+
+                if(resource.TryGetBodyObjectType() is not { } bodyType)
+                {
+                    // unable to get the object type
+                    continue;
+                }
+
+                // collect the values of the expected variant properties
+                // provided that they exist on the type
+                var expectedVariantPropertiesForType = ExpectedVariantResourceProperties.Where(propertyName => bodyType.Properties.ContainsKey(propertyName));
+                var propertyValues = expectedVariantPropertiesForType
+                    .Select(propertyName => resource.SafeGetBodyPropertyValue(propertyName))
+                    .Where(value => value is not null)
+                    .Select(value => value!)
+                    .ToImmutableArray();
+
+                if(!propertyValues.Any())
+                {
+                    // we should not add a warning before they filled in at least some of the properties we're interested in
+                    continue;
+                }
+
+                var indexVariable = @for.IndexVariable;
+                if (propertyValues.Any(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
+                {
+                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(resource.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable, indexVariable, expectedVariantPropertiesForType));
+                }
+            }
+        }
+
+        private static bool IsInvariant(SemanticModel semanticModel, LocalVariableSyntax itemVariable, LocalVariableSyntax? indexVariable, SyntaxBase expression)
+        {
+            var referencedLocals = LocalSymbolDependencyVisitor.GetLocalSymbolDependencies(semanticModel, expression);
+
+            bool IsLocalInvariant(LocalVariableSyntax? local) =>
+                local is { } &&
+                semanticModel.GetSymbolInfo(local) is LocalVariableSymbol localSymbol &&
+                !referencedLocals.Contains(localSymbol);
+
+            return indexVariable is null
+                ? IsLocalInvariant(itemVariable)
+                : IsLocalInvariant(itemVariable) && IsLocalInvariant(indexVariable);
         }
     }
 }

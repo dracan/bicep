@@ -1002,6 +1002,15 @@ namespace Bicep.Core.Diagnostics
                 TextSpan,
                 "BCP176",
                 $"Values of the \"any\" type are not allowed here.");
+
+            public Diagnostic ForExpressionContainsLoopInvariants(LocalVariableSyntax itemVariable, LocalVariableSyntax? indexVariable, IEnumerable<string> expectedVariantProperties) => new(
+                TextSpan,
+                DiagnosticLevel.Warning,
+                "BCP177",
+                indexVariable is null
+                    ? $"The loop item variable \"{itemVariable.Name.IdentifierName}\" must be referenced in at least one of the value expressions of the following properties: {ToQuotedString(expectedVariantProperties)}"
+                    : $"The loop item variable \"{itemVariable.Name.IdentifierName}\" or the index variable \"{indexVariable.Name.IdentifierName}\" must be referenced in at least one of the value expressions of the following properties in the loop body: {ToQuotedString(expectedVariantProperties)}");
+
         }
 
         public static DiagnosticBuilderInternal ForPosition(TextSpan span)
