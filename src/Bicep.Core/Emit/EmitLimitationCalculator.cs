@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Azure.Deployments.Core.Definitions.Identifiers;
 using Bicep.Core.DataFlow;
 using Bicep.Core.Diagnostics;
 using Bicep.Core.Extensions;
@@ -40,7 +41,8 @@ namespace Bicep.Core.Emit
             ForSyntaxValidatorVisitor.Validate(model, diagnosticWriter);
             DetectDuplicateNames(model, diagnosticWriter, resourceScopeData, moduleScopeData);
             DetectIncorrectlyFormattedNames(model, diagnosticWriter);
-            DetectResourceInvariantProperties(model, diagnosticWriter);
+            DetectUnexpectedResourceLoopInvariantProperties(model, diagnosticWriter);
+            DetectUnexpectedModuleLoopInvariantProperties(model, diagnosticWriter);
 
             return new EmitLimitationInfo(diagnosticWriter.GetDiagnostics(), moduleScopeData, resourceScopeData);
         }
@@ -188,7 +190,7 @@ namespace Bicep.Core.Emit
             }
         }
 
-        public static void DetectResourceInvariantProperties(SemanticModel semanticModel, IDiagnosticWriter diagnosticWriter)
+        public static void DetectUnexpectedResourceLoopInvariantProperties(SemanticModel semanticModel, IDiagnosticWriter diagnosticWriter)
         {
             foreach (var resource in semanticModel.Root.GetAllResourceDeclarations())
             {
@@ -223,7 +225,7 @@ namespace Bicep.Core.Emit
                     .Select(value => value!)
                     .ToImmutableArray();
 
-                if(!propertyValues.Any())
+                if (!propertyValues.Any())
                 {
                     // we should not add a warning before they filled in at least some of the properties we're interested in
                     continue;
@@ -233,6 +235,47 @@ namespace Bicep.Core.Emit
                 if (propertyValues.Any(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
                 {
                     diagnosticWriter.Write(DiagnosticBuilder.ForPosition(resource.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable, indexVariable, expectedVariantPropertiesForType));
+                }
+            }
+        }
+
+        public static void DetectUnexpectedModuleLoopInvariantProperties(SemanticModel semanticModel, IDiagnosticWriter diagnosticWriter)
+        {
+            foreach (var module in semanticModel.Root.ModuleDeclarations)
+            {
+                if (module.DeclaringModule.Value is not ForSyntax @for || @for.ItemVariable is not { } itemVariable)
+                {
+                    // invariant identifiers are only a concern for module loops
+                    // this is not a module loop OR the item variable is malformed
+                    continue;
+                }
+
+                if (module.TryGetBodyObjectType() is not { } bodyType)
+                {
+                    // unable to get the object type
+                    continue;
+                }
+
+                // collect the values of the expected variant properties
+                // provided that they exist on the type
+                var expectedVariantPropertiesForType = ExpectedVariantModuleProperties.Where(propertyName => bodyType.Properties.ContainsKey(propertyName));
+                var propertyValues = expectedVariantPropertiesForType
+                    .Select(propertyName => module.SafeGetBodyPropertyValue(propertyName))
+                    .Where(value => value is not null)
+                    .Select(value => value!)
+                    .ToImmutableArray();
+
+                if (!propertyValues.Any())
+                {
+                    // we should not add a warning before they filled in at least some of the expected variant properties
+                    continue;
+                }
+
+                var indexVariable = @for.IndexVariable;
+                if (propertyValues.All(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
+                {
+                    // all the expected variant properties are loop invariant
+                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(module.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable, indexVariable, expectedVariantPropertiesForType));
                 }
             }
         }
