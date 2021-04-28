@@ -234,7 +234,7 @@ namespace Bicep.Core.Emit
                 var indexVariable = @for.IndexVariable;
                 if (propertyValues.Any(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
                 {
-                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(resource.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable, indexVariable, expectedVariantPropertiesForType));
+                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(resource.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable.Name.IdentifierName, indexVariable?.Name.IdentifierName, expectedVariantPropertiesForType));
                 }
             }
         }
@@ -275,7 +275,7 @@ namespace Bicep.Core.Emit
                 if (propertyValues.All(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
                 {
                     // all the expected variant properties are loop invariant
-                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(module.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable, indexVariable, expectedVariantPropertiesForType));
+                    diagnosticWriter.Write(DiagnosticBuilder.ForPosition(module.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable.Name.IdentifierName, indexVariable?.Name.IdentifierName, expectedVariantPropertiesForType));
                 }
             }
         }
