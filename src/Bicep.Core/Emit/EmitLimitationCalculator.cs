@@ -232,7 +232,7 @@ namespace Bicep.Core.Emit
                 }
 
                 var indexVariable = @for.IndexVariable;
-                if (propertyValues.Any(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
+                if (propertyValues.All(pair => IsInvariant(semanticModel, itemVariable, indexVariable, pair)))
                 {
                     diagnosticWriter.Write(DiagnosticBuilder.ForPosition(resource.NameSyntax).ForExpressionContainsLoopInvariants(itemVariable.Name.IdentifierName, indexVariable?.Name.IdentifierName, expectedVariantPropertiesForType));
                 }
